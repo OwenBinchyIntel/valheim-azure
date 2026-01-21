@@ -1,0 +1,96 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+packages:
+  - steamcmd
+  - cifs-utils
+  - tmux
+
+write_files:
+  - path: /opt/valheim/start_valheim.sh
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      SERVER_NAME="OwenValheim"
+      WORLD_NAME="OahuHawaii"
+      SERVER_PASS="change-me"
+      PORT="2456"
+      PUBLIC="1"
+
+      SAVEROOT="/mnt/valheim/__WORLDS_DIR__"
+
+      echo "Starting Valheim with savedir: ${SAVEROOT}"
+      exec /opt/valheim/valheim_server.x86_64 \
+        -name "${SERVER_NAME}" \
+        -port "${PORT}" \
+        -world "${WORLD_NAME}" \
+        -password "${SERVER_PASS}" \
+        -public "${PUBLIC}" \
+        -savedir "${SAVEROOT}"
+
+  - path: /etc/systemd/system/valheim.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Valheim Dedicated Server
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=valheim
+      WorkingDirectory=/opt/valheim
+      Environment=SteamAppId=896660
+      ExecStart=/opt/valheim/start_valheim.sh
+      Restart=on-failure
+      RestartSec=10
+      LimitNOFILE=100000
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  # Create user and directories
+  - useradd -m -s /bin/bash valheim || true
+  - mkdir -p /opt/valheim /mnt/valheim
+  - chown -R valheim:valheim /opt/valheim
+
+  # Mount Azure Files
+  - |
+      set -e
+      echo "Mounting Azure File Share..."
+      STORAGE_ACCOUNT="__STORAGE_ACCOUNT__"
+      FILE_SHARE="__FILE_SHARE__"
+      STORAGE_KEY="__STORAGE_KEY__"
+
+      mkdir -p /mnt/valheim
+
+      # Persist credentials in a root-only file
+      cat >/etc/smbcredentials/${STORAGE_ACCOUNT}.cred <<EOF
+      username=${STORAGE_ACCOUNT}
+      password=${STORAGE_KEY}
+      EOF
+      chmod 600 /etc/smbcredentials/${STORAGE_ACCOUNT}.cred
+
+      # fstab entry (idempotent)
+      if ! grep -q "${STORAGE_ACCOUNT}.file.core.windows.net/${FILE_SHARE}" /etc/fstab; then
+        echo "//${STORAGE_ACCOUNT}.file.core.windows.net/${FILE_SHARE} /mnt/valheim cifs nofail,credentials=/etc/smbcredentials/${STORAGE_ACCOUNT}.cred,dir_mode=0777,file_mode=0777,serverino,vers=3.1.1,nosharesock,actimeo=30 0 0" >> /etc/fstab
+      fi
+
+      mount -a
+      echo "Mounted shares:"
+      mount | grep cifs || true
+
+  # Ensure worlds directory exists and is writable
+  - mkdir -p /mnt/valheim/__WORLDS_DIR__
+  - chown -R valheim:valheim /mnt/valheim/__WORLDS_DIR__
+
+  # Install/update Valheim server
+  - sudo -u valheim bash -lc "steamcmd +force_install_dir /opt/valheim +login anonymous +app_update 896660 validate +quit"
+
+  # Enable and start Valheim
+  - systemctl daemon-reload
+  - systemctl enable valheim
+  - systemctl restart valheim
