@@ -1,2 +1,238 @@
-# valheim-azure
-Setup for Valheim server on Azure VM
+# Valheim Azure VM Deployment
+
+This repository contains Infrastructure as Code (IaC) for deploying a Valheim dedicated server on Azure Virtual Machine using Azure Bicep.
+
+## Architecture
+
+The deployment creates:
+- **Virtual Network** with a dedicated subnet
+- **Network Security Group (NSG)** with rules for SSH (port 22) and Valheim (UDP ports 2456-2458)
+- **Ubuntu 22.04 LTS VM** with SteamCMD and Valheim server
+- **Azure Files mount** for persistent world storage
+- **systemd service** for automatic Valheim server management
+
+## Prerequisites
+
+Before deploying, you need:
+
+1. **Azure CLI** installed ([Install guide](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli))
+2. **Azure subscription** with appropriate permissions
+3. **SSH key pair** for VM access
+4. **Existing Azure Storage Account** with an Azure File Share for world saves
+
+## Quick Start
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/OwenBinchyIntel/valheim-azure.git
+cd valheim-azure
+```
+
+### 2. Configure parameters
+
+Edit `infra/main.parameters.json` with your values:
+
+```json
+{
+  "parameters": {
+    "adminUsername": { "value": "your-username" },
+    "sshSourceCidr": { "value": "YOUR_IP/32" },
+    "storageAccountName": { "value": "your-storage-account" },
+    "fileShareName": { "value": "your-file-share" },
+    "worldsDir": { "value": "worlds_local" }
+  }
+}
+```
+
+### 3. Customize server settings (Optional)
+
+Edit `infra/cloud-init/valheim.yaml` to customize:
+- `SERVER_NAME` - Your server name (default: "OwenValheim")
+- `WORLD_NAME` - World name (default: "OahuHawaii")
+- `SERVER_PASS` - **IMPORTANT**: Change from "change-me" to a secure password
+- `PORT` - Server port (default: 2456)
+- `PUBLIC` - Public visibility (1 = visible, 0 = private)
+
+### 4. Deploy to Azure
+
+```bash
+# Login to Azure
+az login
+
+# Create a resource group
+az group create --name rg-valheim --location eastus
+
+# Deploy the infrastructure
+az deployment group create \
+  --resource-group rg-valheim \
+  --template-file infra/main.bicep \
+  --parameters infra/main.parameters.json \
+  --parameters adminSshPublicKey="$(cat ~/.ssh/id_rsa.pub)" \
+  --parameters storageAccountKey="YOUR_STORAGE_KEY"
+```
+
+### 5. Get the public IP
+
+```bash
+az deployment group show \
+  --resource-group rg-valheim \
+  --name main \
+  --query properties.outputs.publicIp.value \
+  --output tsv
+```
+
+### 6. Connect to your server
+
+In Valheim:
+1. Open the Community tab
+2. Click "Join Game"
+3. Enter the public IP and port (e.g., `1.2.3.4:2456`)
+4. Enter your server password
+
+## Configuration
+
+### VM Sizing
+
+The default VM size is `Standard_B2ms` (2 vCPUs, 8 GB RAM) suitable for 2-6 players. For larger servers, update the `vmSize` parameter:
+
+- **2-4 players**: Standard_B2ms
+- **5-8 players**: Standard_B2s (2 vCPU, 4 GB) or Standard_D2s_v3
+- **8+ players**: Standard_D4s_v3 or higher
+
+### Network Security
+
+#### SSH Access
+By default, SSH is restricted to allow connections from anywhere (`*`). **For production, restrict SSH access**:
+
+```json
+"sshSourceCidr": { "value": "YOUR_PUBLIC_IP/32" }
+```
+
+To find your public IP:
+```bash
+curl https://api.ipify.org
+```
+
+#### Valheim Ports
+The deployment opens UDP ports 2456-2458 for Valheim game traffic from all sources.
+
+## Management
+
+### SSH into the VM
+
+```bash
+ssh your-username@PUBLIC_IP
+```
+
+### Check server status
+
+```bash
+sudo systemctl status valheim
+```
+
+### View server logs
+
+```bash
+sudo journalctl -u valheim -f
+```
+
+### Restart the server
+
+```bash
+sudo systemctl restart valheim
+```
+
+### Stop the server
+
+```bash
+sudo systemctl stop valheim
+```
+
+## World Persistence
+
+World saves are stored in Azure Files at `/mnt/valheim/worlds_local/` by default. This ensures:
+- **Persistence** across VM restarts or replacements
+- **Backup capability** through Azure Files snapshots
+- **Portability** to move worlds between deployments
+
+## Cost Optimization
+
+To minimize costs when not playing:
+
+### Deallocate the VM
+```bash
+az vm deallocate --resource-group rg-valheim --name valheim-vm
+```
+
+### Start the VM
+```bash
+az vm start --resource-group rg-valheim --name valheim-vm
+```
+
+**Note**: The public IP may change after deallocation. Check the IP after starting.
+
+## Security Best Practices
+
+### ⚠️ Critical Security Items
+
+1. **Change the default server password** in `cloud-init/valheim.yaml`
+2. **Restrict SSH access** by setting `sshSourceCidr` to your IP
+3. **Protect sensitive parameters**:
+   - Never commit `storageAccountKey` to version control
+   - Use Azure Key Vault for production deployments
+   - Pass sensitive values via command-line parameters
+
+### Example with Key Vault
+
+```bash
+az deployment group create \
+  --resource-group rg-valheim \
+  --template-file infra/main.bicep \
+  --parameters infra/main.parameters.json \
+  --parameters adminSshPublicKey="$(cat ~/.ssh/id_rsa.pub)" \
+  --parameters storageAccountKey="$(az keyvault secret show --vault-name your-vault --name storage-key --query value -o tsv)"
+```
+
+## Troubleshooting
+
+### Server won't start
+1. SSH into the VM
+2. Check logs: `sudo journalctl -u valheim -f`
+3. Verify Azure Files mount: `mount | grep cifs`
+4. Check Steam installation: `ls -la /opt/valheim`
+
+### Can't connect to server
+1. Verify NSG rules allow UDP 2456-2458
+2. Check server is running: `sudo systemctl status valheim`
+3. Confirm public IP hasn't changed
+4. Verify server password is correct
+
+### Azure Files mount fails
+1. Check storage account credentials
+2. Verify file share exists
+3. Check network connectivity: `ping your-storage-account.file.core.windows.net`
+
+## Cleanup
+
+To delete all resources:
+
+```bash
+az group delete --name rg-valheim --yes
+```
+
+**Note**: This will delete the VM but not the Azure Storage Account with your world saves.
+
+## Contributing
+
+Contributions are welcome! Please open an issue or submit a pull request.
+
+## License
+
+This project is provided as-is for educational and personal use.
+
+## Acknowledgments
+
+- Built with Azure Bicep
+- Uses SteamCMD for Valheim server installation
+- Inspired by the Valheim community
