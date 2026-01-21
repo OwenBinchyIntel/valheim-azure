@@ -36,7 +36,9 @@ Edit `infra/main.parameters.json` with your values:
 ```json
 {
   "parameters": {
+    "location": { "value": "northeurope" },
     "adminUsername": { "value": "your-username" },
+    "vmSize": { "value": "Standard_D2s_v5" },
     "sshSourceCidr": { "value": "YOUR_IP/32" },
     "storageAccountName": { "value": "your-storage-account" },
     "fileShareName": { "value": "your-file-share" },
@@ -44,6 +46,8 @@ Edit `infra/main.parameters.json` with your values:
   }
 }
 ```
+
+**Important**: The storage account and file share must already exist and be pre-configured with your world data. This deployment does not create storage resources.
 
 ### 3. Customize server settings (Optional)
 
@@ -61,7 +65,7 @@ Edit `infra/cloud-init/valheim.yaml` to customize:
 # Login to Azure
 az login
 
-# Create a resource group
+# Create a resource group (change location as needed)
 az group create --name rg-valheim-vm --location northeurope
 
 # Deploy the infrastructure
@@ -73,6 +77,22 @@ az deployment group create \
   --parameters storageAccountKey="YOUR_STORAGE_KEY" \
   --parameters serverPass="YOUR_SECURE_PASSWORD"
 ```
+
+**Deployment to different regions**: You can override the location in the parameters file or at deployment time:
+
+```bash
+# Override location at deployment time
+az deployment group create \
+  --resource-group rg-valheim-vm \
+  --template-file infra/main.bicep \
+  --parameters infra/main.parameters.json \
+  --parameters location="westeurope" \
+  --parameters adminSshPublicKey="$(cat ~/.ssh/id_rsa.pub)" \
+  --parameters storageAccountKey="YOUR_STORAGE_KEY" \
+  --parameters serverPass="YOUR_SECURE_PASSWORD"
+```
+
+**Note**: The `location` parameter controls where compute resources (VM, VNet, NSG) are deployed. This is useful when your preferred region has no capacity.
 
 ### 5. Get the public IP
 
@@ -93,13 +113,39 @@ In Valheim:
 
 ## Configuration
 
+### Region Selection
+
+The deployment supports configurable regions for all compute resources (VM, VNet, NSG, etc.):
+
+- **Default**: Uses the resource group's location
+- **Via parameters file**: Set `"location": { "value": "westeurope" }` in `main.parameters.json`
+- **Via command line**: Add `--parameters location="uksouth"` to your deployment command
+
+Common regions: `northeurope`, `westeurope`, `uksouth`, `eastus`, `westus2`
+
 ### VM Sizing
 
-The default VM size is `Standard_B2ms` (2 vCPUs, 8 GB RAM) suitable for 2-6 players. For larger servers, update the `vmSize` parameter:
+### VM Sizing
 
-- **2-4 players**: Standard_B2ms (2 vCPU, 8 GB)
+The deployment supports flexible VM sizes configurable via the `vmSize` parameter:
+
+- **Default in template**: `Standard_B2ms` (2 vCPUs, 8 GB RAM)
+- **Recommended for better performance**: `Standard_D2s_v5` or `Standard_E2as_v5`
+
+Sizing guidance by player count:
+- **2-4 players**: Standard_B2ms (2 vCPU, 8 GB) or Standard_D2s_v5 (2 vCPU, 8 GB)
 - **5-8 players**: Standard_D2s_v3 (2 vCPU, 8 GB) or Standard_B4ms (4 vCPU, 16 GB)
 - **8+ players**: Standard_D4s_v3 (4 vCPU, 16 GB) or higher
+
+Set in `main.parameters.json`:
+```json
+"vmSize": { "value": "Standard_D2s_v5" }
+```
+
+Or override at deployment:
+```bash
+--parameters vmSize="Standard_E2as_v5"
+```
 
 ### Network Security
 
@@ -183,15 +229,21 @@ az vm start --resource-group rg-valheim-vm --name valheim-vm
 
 ### ⚠️ Critical Security Items
 
-1. **Use a strong server password** - Pass `serverPass` parameter securely during deployment
-2. **Protect sensitive parameters**:
-   - Never commit `storageAccountKey` or `serverPass` to version control
-   - Use Azure Key Vault for production deployments
-   - Pass sensitive values via command-line parameters
+1. **Never commit secrets to version control**:
+   - `storageAccountKey` and `serverPass` must ONLY be passed at deployment time
+   - These parameters are marked as `@secure()` in Bicep and are NOT in `main.parameters.json`
+   - Pass them via command-line parameters only
 
-### Example with Key Vault
+2. **Use a strong server password** - Pass `serverPass` parameter securely during deployment
+
+3. **Protect deployment commands**:
+   - Use Azure Key Vault for production deployments
+   - Consider using environment variables or secure input methods
+
+### Example with secure input
 
 ```bash
+# Prompt for secrets securely (no command history)
 read -s -p "Storage account key: " STORAGE_KEY; echo
 read -s -p "Server password: " SERVER_PASS; echo
 
@@ -202,7 +254,6 @@ az deployment group create \
   --parameters adminSshPublicKey="$(cat ~/.ssh/id_rsa.pub)" \
   --parameters storageAccountKey="$STORAGE_KEY" \
   --parameters serverPass="$SERVER_PASS"
-
 ```
 
 ## Troubleshooting

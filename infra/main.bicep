@@ -49,7 +49,6 @@ module nsg './modules/nsg.bicep' = {
   params: {
     location: location
     namePrefix: namePrefix
-    vnetName: network.outputs.vnetName
     subnetName: network.outputs.subnetName
     sshSourceCidr: sshSourceCidr
   }

@@ -1,6 +1,5 @@
 param location string
 param namePrefix string
-param vnetName string
 param subnetName string
 param sshSourceCidr string
 
@@ -49,7 +48,8 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
 }
 
 resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
-  name: '${vnet.name}/${subnetName}'
+  parent: vnet
+  name: subnetName
   properties: {
     addressPrefix: '10.10.1.0/24'
     networkSecurityGroup: {
