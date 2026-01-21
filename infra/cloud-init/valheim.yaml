@@ -1,0 +1,96 @@
+#cloud-config
+# Cloud-init configuration for Valheim server
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - wget
+  - ca-certificates
+  - software-properties-common
+  - lib32gcc-s1
+  - libsdl2-2.0-0:i386
+
+runcmd:
+  # Add i386 architecture for SteamCMD
+  - dpkg --add-architecture i386
+  - apt-get update
+
+  # Create steam user
+  - useradd -m -s /bin/bash steam
+
+  # Create Valheim directories
+  - mkdir -p /home/steam/valheim-server
+  - mkdir -p /home/steam/valheim-data
+  - chown -R steam:steam /home/steam
+
+  # Install SteamCMD
+  - |
+    su - steam -c "
+    mkdir -p /home/steam/steamcmd
+    cd /home/steam/steamcmd
+    wget https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
+    tar -xvzf steamcmd_linux.tar.gz
+    "
+
+  # Install Valheim Server
+  - |
+    su - steam -c "
+    /home/steam/steamcmd/steamcmd.sh +force_install_dir /home/steam/valheim-server +login anonymous +app_update 896660 validate +quit
+    "
+
+  # Create Valheim start script
+  - |
+    cat > /home/steam/start_valheim.sh << 'EOF'
+    #!/bin/bash
+    export templdpath=\$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=./linux64:\$LD_LIBRARY_PATH
+    export SteamAppId=892970
+
+    # Server configuration
+    SERVER_NAME="\${VALHEIM_SERVER_NAME:-My Valheim Server}"
+    WORLD_NAME="\${VALHEIM_WORLD_NAME:-Dedicated}"
+    SERVER_PASSWORD="\${VALHEIM_SERVER_PASSWORD:-secret}"
+    SERVER_PUBLIC="\${VALHEIM_SERVER_PUBLIC:-1}"
+
+    echo "Starting Valheim server..."
+    cd /home/steam/valheim-server
+    ./valheim_server.x86_64 -name "\$SERVER_NAME" -port 2456 -world "\$WORLD_NAME" -password "\$SERVER_PASSWORD" -public \$SERVER_PUBLIC -savedir /home/steam/valheim-data
+    EOF
+
+  - chmod +x /home/steam/start_valheim.sh
+  - chown steam:steam /home/steam/start_valheim.sh
+
+  # Create systemd service for Valheim
+  - |
+    cat > /etc/systemd/system/valheim.service << 'EOF'
+    [Unit]
+    Description=Valheim Server
+    After=network.target
+
+    [Service]
+    Type=simple
+    User=steam
+    WorkingDirectory=/home/steam/valheim-server
+    ExecStart=/home/steam/start_valheim.sh
+    Restart=on-failure
+    RestartSec=10
+
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+
+  - systemctl daemon-reload
+  - systemctl enable valheim.service
+
+write_files:
+  - path: /etc/environment
+    content: |
+      VALHEIM_SERVER_NAME="My Valheim Server"
+      VALHEIM_WORLD_NAME="Dedicated"
+      VALHEIM_SERVER_PASSWORD=""
+      VALHEIM_SERVER_PUBLIC="1"
+    append: true
+
+final_message: "Valheim server cloud-init setup complete. Configure environment variables and start with: sudo systemctl start valheim"
