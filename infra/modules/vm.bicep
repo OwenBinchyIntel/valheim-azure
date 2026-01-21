@@ -13,6 +13,9 @@ param fileShareName string
 param storageAccountKey string
 param worldsDir string
 
+@secure()
+param serverPass string
+
 param cloudInit string
 
 resource pip 'Microsoft.Network/publicIPAddresses@2023-11-01' = {
@@ -47,11 +50,12 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
   }
 }
 
-var renderedCloudInit = replace(replace(replace(replace(cloudInit,
+var renderedCloudInit = replace(replace(replace(replace(replace(cloudInit,
   '__STORAGE_ACCOUNT__', storageAccountName),
   '__FILE_SHARE__', fileShareName),
   '__STORAGE_KEY__', storageAccountKey),
-  '__WORLDS_DIR__', worldsDir)
+  '__WORLDS_DIR__', worldsDir),
+  '__SERVER_PASS__', serverPass)
 
 resource vm 'Microsoft.Compute/virtualMachines@2024-03-01' = {
   name: '${namePrefix}-vm'

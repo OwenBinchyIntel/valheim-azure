@@ -50,9 +50,10 @@ Edit `infra/main.parameters.json` with your values:
 Edit `infra/cloud-init/valheim.yaml` to customize:
 - `SERVER_NAME` - Your server name (default: "OwenValheim")
 - `WORLD_NAME` - World name (default: "OahuHawaii")
-- `SERVER_PASS` - **IMPORTANT**: Change from "change-me" to a secure password
 - `PORT` - Server port (default: 2456)
 - `PUBLIC` - Public visibility (1 = visible, 0 = private)
+
+**Note**: The server password is passed as a secure parameter during deployment (see step 4).
 
 ### 4. Deploy to Azure
 
@@ -69,7 +70,8 @@ az deployment group create \
   --template-file infra/main.bicep \
   --parameters infra/main.parameters.json \
   --parameters adminSshPublicKey="$(cat ~/.ssh/id_rsa.pub)" \
-  --parameters storageAccountKey="YOUR_STORAGE_KEY"
+  --parameters storageAccountKey="YOUR_STORAGE_KEY" \
+  --parameters serverPass="YOUR_SECURE_PASSWORD"
 ```
 
 ### 5. Get the public IP
@@ -176,10 +178,9 @@ az vm start --resource-group rg-valheim --name valheim-vm
 
 ### ⚠️ Critical Security Items
 
-1. **Change the default server password** in `cloud-init/valheim.yaml`
-2. **Restrict SSH access** by setting `sshSourceCidr` to your IP
-3. **Protect sensitive parameters**:
-   - Never commit `storageAccountKey` to version control
+1. **Use a strong server password** - Pass `serverPass` parameter securely during deployment
+2. **Protect sensitive parameters**:
+   - Never commit `storageAccountKey` or `serverPass` to version control
    - Use Azure Key Vault for production deployments
    - Pass sensitive values via command-line parameters
 
@@ -191,7 +192,8 @@ az deployment group create \
   --template-file infra/main.bicep \
   --parameters infra/main.parameters.json \
   --parameters adminSshPublicKey="$(cat ~/.ssh/id_rsa.pub)" \
-  --parameters storageAccountKey="$(az keyvault secret show --vault-name your-vault --name storage-key --query value -o tsv)"
+  --parameters storageAccountKey="$(az keyvault secret show --vault-name your-vault --name storage-key --query value -o tsv)" \
+  --parameters serverPass="$(az keyvault secret show --vault-name your-vault --name server-pass --query value -o tsv)"
 ```
 
 ## Troubleshooting
