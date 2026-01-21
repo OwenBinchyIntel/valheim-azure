@@ -62,11 +62,11 @@ Edit `infra/cloud-init/valheim.yaml` to customize:
 az login
 
 # Create a resource group
-az group create --name rg-valheim --location eastus
+az group create --name rg-valheim-vm --location northeurope
 
 # Deploy the infrastructure
 az deployment group create \
-  --resource-group rg-valheim \
+  --resource-group rg-valheim-vm \
   --template-file infra/main.bicep \
   --parameters infra/main.parameters.json \
   --parameters adminSshPublicKey="$(cat ~/.ssh/id_rsa.pub)" \
@@ -77,11 +77,10 @@ az deployment group create \
 ### 5. Get the public IP
 
 ```bash
-az deployment group show \
-  --resource-group rg-valheim \
-  --name main \
-  --query properties.outputs.publicIp.value \
-  --output tsv
+az deployment group list \
+  --resource-group rg-valheim-vm \
+  --query "[?properties.provisioningState=='Succeeded'] | [-1].properties.outputs.publicIp.value" \
+  -o tsv
 ```
 
 ### 6. Connect to your server
@@ -105,7 +104,8 @@ The default VM size is `Standard_B2ms` (2 vCPUs, 8 GB RAM) suitable for 2-6 play
 ### Network Security
 
 #### SSH Access
-By default, SSH is restricted to allow connections from anywhere (`*`). **For production, restrict SSH access**:
+By default, SSH is allowed from any IP (`*`).  
+For better security, restrict SSH access to your public IP:
 
 ```json
 "sshSourceCidr": { "value": "YOUR_PUBLIC_IP/32" }
@@ -158,21 +158,26 @@ World saves are stored in Azure Files at `/mnt/valheim/worlds_local/` by default
 - **Backup capability** through Azure Files snapshots
 - **Portability** to move worlds between deployments
 
+> Note: Azure Files performance is more than sufficient for small Valheim servers (2–6 players).  
+> For heavily modded servers or larger player counts, a managed disk may be preferred.
+
+
 ## Cost Optimization
 
 To minimize costs when not playing:
 
 ### Deallocate the VM
 ```bash
-az vm deallocate --resource-group rg-valheim --name valheim-vm
+az vm deallocate --resource-group rg-valheim-vm --name valheim-vm
 ```
 
 ### Start the VM
 ```bash
-az vm start --resource-group rg-valheim --name valheim-vm
+az vm start --resource-group rg-valheim-vm --name valheim-vm
 ```
 
-**Note**: The public IP may change after deallocation. Check the IP after starting.
+**Note**: The public IP will remain the same after deallocation, as a Static Standard Public IP is used.
+
 
 ## Security Best Practices
 
@@ -187,13 +192,17 @@ az vm start --resource-group rg-valheim --name valheim-vm
 ### Example with Key Vault
 
 ```bash
+read -s -p "Storage account key: " STORAGE_KEY; echo
+read -s -p "Server password: " SERVER_PASS; echo
+
 az deployment group create \
-  --resource-group rg-valheim \
+  --resource-group rg-valheim-vm \
   --template-file infra/main.bicep \
   --parameters infra/main.parameters.json \
   --parameters adminSshPublicKey="$(cat ~/.ssh/id_rsa.pub)" \
-  --parameters storageAccountKey="$(az keyvault secret show --vault-name your-vault --name storage-key --query value -o tsv)" \
-  --parameters serverPass="$(az keyvault secret show --vault-name your-vault --name server-pass --query value -o tsv)"
+  --parameters storageAccountKey="$STORAGE_KEY" \
+  --parameters serverPass="$SERVER_PASS"
+
 ```
 
 ## Troubleshooting
@@ -220,7 +229,7 @@ az deployment group create \
 To delete all resources:
 
 ```bash
-az group delete --name rg-valheim --yes
+az group delete --name rg-valheim-vm --yes
 ```
 
 **Note**: This will delete the VM but not the Azure Storage Account with your world saves.
@@ -238,3 +247,11 @@ This project is provided as-is for educational and personal use.
 - Built with Azure Bicep
 - Uses SteamCMD for Valheim server installation
 - Inspired by the Valheim community
+
+## Roadmap
+
+Planned enhancements:
+- Azure Function + Discord bot for start/stop/status control
+- Managed Identity + Key Vault integration (no secrets in deployment)
+- Identity-based authentication for Azure Files
+- Optional automation for backups and snapshots
