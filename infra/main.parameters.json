@@ -4,7 +4,6 @@
   "parameters": {
     "adminUsername": { "value": "owen" },
     "sshSourceCidr": { "value": "*" },
-    "storageResourceGroup": { "value": "rg-valheim-aci" },
     "storageAccountName": { "value": "valheim7463" },
     "fileShareName": { "value": "valheim" },
     "worldsDir": { "value": "worlds_local" }
