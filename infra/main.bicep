@@ -1,4 +1,3 @@
-
 targetScope = 'resourceGroup'
 
 @description('Azure region for all resources')
