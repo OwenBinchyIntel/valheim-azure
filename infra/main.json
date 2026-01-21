@@ -1,0 +1,493 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.39.26.7824",
+      "templateHash": "18327465096707253264"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for all resources"
+      }
+    },
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "valheim",
+      "metadata": {
+        "description": "Prefix used for naming resources"
+      }
+    },
+    "adminUsername": {
+      "type": "string",
+      "metadata": {
+        "description": "Admin username for the VM"
+      }
+    },
+    "adminSshPublicKey": {
+      "type": "securestring",
+      "metadata": {
+        "description": "SSH public key for the admin user"
+      }
+    },
+    "vmSize": {
+      "type": "string",
+      "defaultValue": "Standard_B2ms",
+      "metadata": {
+        "description": "VM size (B2ms is a good default for 2-6 players)"
+      }
+    },
+    "sshSourceCidr": {
+      "type": "string",
+      "defaultValue": "*",
+      "metadata": {
+        "description": "CIDR allowed to SSH (set to your public IP /32). Use \"*\" only temporarily."
+      }
+    },
+    "storageAccountName": {
+      "type": "string",
+      "defaultValue": "valheim7463",
+      "metadata": {
+        "description": "Existing storage account name that contains the Azure File Share"
+      }
+    },
+    "fileShareName": {
+      "type": "string",
+      "defaultValue": "valheim",
+      "metadata": {
+        "description": "Existing Azure File Share name"
+      }
+    },
+    "storageAccountKey": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Storage account key used to mount Azure Files (MVP). Do not commit."
+      }
+    },
+    "worldsDir": {
+      "type": "string",
+      "defaultValue": "worlds_local",
+      "metadata": {
+        "description": "Directory within the share where Valheim worlds live"
+      }
+    },
+    "serverPass": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Valheim server password"
+      }
+    }
+  },
+  "variables": {
+    "$fxv#0": "#cloud-config\r\npackage_update: true\r\npackage_upgrade: true\r\npackages:\r\n  - steamcmd\r\n  - cifs-utils\r\n  - tmux\r\n\r\nwrite_files:\r\n  - path: /opt/valheim/start_valheim.sh\r\n    permissions: '0755'\r\n    content: |\r\n      #!/usr/bin/env bash\r\n      set -euo pipefail\r\n\r\n      SERVER_NAME=\"OwenValheim\"\r\n      WORLD_NAME=\"OahuHawaii\"\r\n      SERVER_PASS=\"__SERVER_PASS__\"\r\n      PORT=\"2456\"\r\n      PUBLIC=\"1\"\r\n\r\n      SAVEROOT=\"/mnt/valheim/__WORLDS_DIR__\"\r\n\r\n      echo \"Starting Valheim with savedir: ${SAVEROOT}\"\r\n      exec /opt/valheim/valheim_server.x86_64 \\\r\n        -name \"${SERVER_NAME}\" \\\r\n        -port \"${PORT}\" \\\r\n        -world \"${WORLD_NAME}\" \\\r\n        -password \"${SERVER_PASS}\" \\\r\n        -public \"${PUBLIC}\" \\\r\n        -savedir \"${SAVEROOT}\"\r\n\r\n  - path: /etc/systemd/system/valheim.service\r\n    permissions: '0644'\r\n    content: |\r\n      [Unit]\r\n      Description=Valheim Dedicated Server\r\n      After=network-online.target\r\n      Wants=network-online.target\r\n\r\n      [Service]\r\n      Type=simple\r\n      User=valheim\r\n      WorkingDirectory=/opt/valheim\r\n      Environment=SteamAppId=896660\r\n      ExecStart=/opt/valheim/start_valheim.sh\r\n      Restart=on-failure\r\n      RestartSec=10\r\n      LimitNOFILE=100000\r\n\r\n      [Install]\r\n      WantedBy=multi-user.target\r\n\r\nruncmd:\r\n  # Create user and directories\r\n  - useradd -m -s /bin/bash valheim || true\r\n  - mkdir -p /opt/valheim /mnt/valheim\r\n  - chown -R valheim:valheim /opt/valheim\r\n\r\n  # Mount Azure Files\r\n  - |\r\n      set -e\r\n      echo \"Mounting Azure File Share...\"\r\n      STORAGE_ACCOUNT=\"__STORAGE_ACCOUNT__\"\r\n      FILE_SHARE=\"__FILE_SHARE__\"\r\n      STORAGE_KEY=\"__STORAGE_KEY__\"\r\n\r\n      mkdir -p /mnt/valheim\r\n\r\n      # Persist credentials in a root-only file\r\n      cat >/etc/smbcredentials/${STORAGE_ACCOUNT}.cred <<EOF\r\n      username=${STORAGE_ACCOUNT}\r\n      password=${STORAGE_KEY}\r\n      EOF\r\n      chmod 600 /etc/smbcredentials/${STORAGE_ACCOUNT}.cred\r\n\r\n      # fstab entry (idempotent)\r\n      if ! grep -q \"${STORAGE_ACCOUNT}.file.core.windows.net/${FILE_SHARE}\" /etc/fstab; then\r\n        echo \"//${STORAGE_ACCOUNT}.file.core.windows.net/${FILE_SHARE} /mnt/valheim cifs nofail,credentials=/etc/smbcredentials/${STORAGE_ACCOUNT}.cred,dir_mode=0777,file_mode=0777,serverino,vers=3.1.1,nosharesock,actimeo=30 0 0\" >> /etc/fstab\r\n      fi\r\n\r\n      mount -a\r\n      echo \"Mounted shares:\"\r\n      mount | grep cifs || true\r\n\r\n  # Ensure worlds directory exists and is writable\r\n  - mkdir -p /mnt/valheim/__WORLDS_DIR__\r\n  - chown -R valheim:valheim /mnt/valheim/__WORLDS_DIR__\r\n\r\n  # Install/update Valheim server\r\n  - sudo -u valheim bash -lc \"steamcmd +force_install_dir /opt/valheim +login anonymous +app_update 896660 validate +quit\"\r\n\r\n  # Enable and start Valheim\r\n  - systemctl daemon-reload\r\n  - systemctl enable valheim\r\n  - systemctl restart valheim\r\n"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-network', parameters('namePrefix'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "14598472219602254892"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string"
+            },
+            "namePrefix": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/virtualNetworks",
+              "apiVersion": "2023-11-01",
+              "name": "[format('{0}-vnet', parameters('namePrefix'))]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "addressSpace": {
+                  "addressPrefixes": [
+                    "10.10.0.0/16"
+                  ]
+                },
+                "subnets": [
+                  {
+                    "name": "[format('{0}-subnet', parameters('namePrefix'))]",
+                    "properties": {
+                      "addressPrefix": "10.10.1.0/24"
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "outputs": {
+            "vnetName": {
+              "type": "string",
+              "value": "[format('{0}-vnet', parameters('namePrefix'))]"
+            },
+            "subnetName": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', format('{0}-vnet', parameters('namePrefix'))), '2023-11-01').subnets[0].name]"
+            },
+            "subnetId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', format('{0}-vnet', parameters('namePrefix'))), '2023-11-01').subnets[0].id]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-nsg', parameters('namePrefix'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          },
+          "vnetName": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-network', parameters('namePrefix'))), '2025-04-01').outputs.vnetName.value]"
+          },
+          "subnetName": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-network', parameters('namePrefix'))), '2025-04-01').outputs.subnetName.value]"
+          },
+          "sshSourceCidr": {
+            "value": "[parameters('sshSourceCidr')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "3829577393156820814"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string"
+            },
+            "namePrefix": {
+              "type": "string"
+            },
+            "vnetName": {
+              "type": "string"
+            },
+            "subnetName": {
+              "type": "string"
+            },
+            "sshSourceCidr": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2023-11-01",
+              "name": "[format('{0}-nsg', parameters('namePrefix'))]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "securityRules": [
+                  {
+                    "name": "Allow-SSH",
+                    "properties": {
+                      "priority": 100,
+                      "access": "Allow",
+                      "direction": "Inbound",
+                      "protocol": "Tcp",
+                      "sourceAddressPrefix": "[parameters('sshSourceCidr')]",
+                      "sourcePortRange": "*",
+                      "destinationAddressPrefix": "*",
+                      "destinationPortRange": "22"
+                    }
+                  },
+                  {
+                    "name": "Allow-Valheim-UDP",
+                    "properties": {
+                      "priority": 110,
+                      "access": "Allow",
+                      "direction": "Inbound",
+                      "protocol": "Udp",
+                      "sourceAddressPrefix": "*",
+                      "sourcePortRange": "*",
+                      "destinationAddressPrefix": "*",
+                      "destinationPortRanges": [
+                        "2456",
+                        "2457",
+                        "2458"
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Network/virtualNetworks/subnets",
+              "apiVersion": "2023-11-01",
+              "name": "[format('{0}/{1}', format('{0}-vnet', parameters('namePrefix')), parameters('subnetName'))]",
+              "properties": {
+                "addressPrefix": "10.10.1.0/24",
+                "networkSecurityGroup": {
+                  "id": "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-nsg', parameters('namePrefix')))]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-nsg', parameters('namePrefix')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "nsgId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-nsg', parameters('namePrefix')))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-network', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-vm', parameters('namePrefix'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          },
+          "subnetId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-network', parameters('namePrefix'))), '2025-04-01').outputs.subnetId.value]"
+          },
+          "adminUsername": {
+            "value": "[parameters('adminUsername')]"
+          },
+          "adminSshPublicKey": {
+            "value": "[parameters('adminSshPublicKey')]"
+          },
+          "vmSize": {
+            "value": "[parameters('vmSize')]"
+          },
+          "storageAccountName": {
+            "value": "[parameters('storageAccountName')]"
+          },
+          "fileShareName": {
+            "value": "[parameters('fileShareName')]"
+          },
+          "storageAccountKey": {
+            "value": "[parameters('storageAccountKey')]"
+          },
+          "worldsDir": {
+            "value": "[parameters('worldsDir')]"
+          },
+          "serverPass": {
+            "value": "[parameters('serverPass')]"
+          },
+          "cloudInit": {
+            "value": "[variables('$fxv#0')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "15579373846046084217"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string"
+            },
+            "namePrefix": {
+              "type": "string"
+            },
+            "subnetId": {
+              "type": "string"
+            },
+            "adminUsername": {
+              "type": "string"
+            },
+            "adminSshPublicKey": {
+              "type": "securestring"
+            },
+            "vmSize": {
+              "type": "string"
+            },
+            "storageAccountName": {
+              "type": "string"
+            },
+            "fileShareName": {
+              "type": "string"
+            },
+            "storageAccountKey": {
+              "type": "securestring"
+            },
+            "worldsDir": {
+              "type": "string"
+            },
+            "serverPass": {
+              "type": "securestring"
+            },
+            "cloudInit": {
+              "type": "string"
+            }
+          },
+          "variables": {
+            "renderedCloudInit": "[replace(replace(replace(replace(replace(parameters('cloudInit'), '__STORAGE_ACCOUNT__', parameters('storageAccountName')), '__FILE_SHARE__', parameters('fileShareName')), '__STORAGE_KEY__', parameters('storageAccountKey')), '__WORLDS_DIR__', parameters('worldsDir')), '__SERVER_PASS__', parameters('serverPass'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/publicIPAddresses",
+              "apiVersion": "2023-11-01",
+              "name": "[format('{0}-pip', parameters('namePrefix'))]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "Standard"
+              },
+              "properties": {
+                "publicIPAllocationMethod": "Static"
+              }
+            },
+            {
+              "type": "Microsoft.Network/networkInterfaces",
+              "apiVersion": "2023-11-01",
+              "name": "[format('{0}-nic', parameters('namePrefix'))]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "ipConfigurations": [
+                  {
+                    "name": "ipconfig1",
+                    "properties": {
+                      "privateIPAllocationMethod": "Dynamic",
+                      "publicIPAddress": {
+                        "id": "[resourceId('Microsoft.Network/publicIPAddresses', format('{0}-pip', parameters('namePrefix')))]"
+                      },
+                      "subnet": {
+                        "id": "[parameters('subnetId')]"
+                      }
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/publicIPAddresses', format('{0}-pip', parameters('namePrefix')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Compute/virtualMachines",
+              "apiVersion": "2024-03-01",
+              "name": "[format('{0}-vm', parameters('namePrefix'))]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "hardwareProfile": {
+                  "vmSize": "[parameters('vmSize')]"
+                },
+                "osProfile": {
+                  "computerName": "[format('{0}-vm', parameters('namePrefix'))]",
+                  "adminUsername": "[parameters('adminUsername')]",
+                  "linuxConfiguration": {
+                    "disablePasswordAuthentication": true,
+                    "ssh": {
+                      "publicKeys": [
+                        {
+                          "path": "[format('/home/{0}/.ssh/authorized_keys', parameters('adminUsername'))]",
+                          "keyData": "[parameters('adminSshPublicKey')]"
+                        }
+                      ]
+                    }
+                  },
+                  "customData": "[base64(variables('renderedCloudInit'))]"
+                },
+                "storageProfile": {
+                  "imageReference": {
+                    "publisher": "Canonical",
+                    "offer": "0001-com-ubuntu-server-jammy",
+                    "sku": "22_04-lts-gen2",
+                    "version": "latest"
+                  },
+                  "osDisk": {
+                    "createOption": "FromImage",
+                    "managedDisk": {
+                      "storageAccountType": "StandardSSD_LRS"
+                    }
+                  }
+                },
+                "networkProfile": {
+                  "networkInterfaces": [
+                    {
+                      "id": "[resourceId('Microsoft.Network/networkInterfaces', format('{0}-nic', parameters('namePrefix')))]"
+                    }
+                  ]
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/networkInterfaces', format('{0}-nic', parameters('namePrefix')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "publicIp": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', format('{0}-pip', parameters('namePrefix'))), '2023-11-01').ipAddress]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-network', parameters('namePrefix')))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "publicIp": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-vm', parameters('namePrefix'))), '2025-04-01').outputs.publicIp.value]"
+    }
+  }
+}
