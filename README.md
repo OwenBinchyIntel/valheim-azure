@@ -96,9 +96,9 @@ In Valheim:
 
 The default VM size is `Standard_B2ms` (2 vCPUs, 8 GB RAM) suitable for 2-6 players. For larger servers, update the `vmSize` parameter:
 
-- **2-4 players**: Standard_B2ms
-- **5-8 players**: Standard_B2s (2 vCPU, 4 GB) or Standard_D2s_v3
-- **8+ players**: Standard_D4s_v3 or higher
+- **2-4 players**: Standard_B2ms (2 vCPU, 8 GB)
+- **5-8 players**: Standard_D2s_v3 (2 vCPU, 8 GB) or Standard_B4ms (4 vCPU, 16 GB)
+- **8+ players**: Standard_D4s_v3 (4 vCPU, 16 GB) or higher
 
 ### Network Security
 
