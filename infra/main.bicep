@@ -19,9 +19,6 @@ param vmSize string = 'Standard_B2ms'
 @description('CIDR allowed to SSH (set to your public IP /32). Use "*" only temporarily.')
 param sshSourceCidr string = '*'
 
-@description('Resource group that contains the existing storage account')
-param storageResourceGroup string = 'rg-valheim-aci'
-
 @description('Existing storage account name that contains the Azure File Share')
 param storageAccountName string = 'valheim7463'
 
@@ -34,6 +31,10 @@ param storageAccountKey string
 
 @description('Directory within the share where Valheim worlds live')
 param worldsDir string = 'worlds_local'
+
+@secure()
+@description('Valheim server password')
+param serverPass string
 
 module network './modules/network.bicep' = {
   name: '${namePrefix}-network'
@@ -68,6 +69,7 @@ module vm './modules/vm.bicep' = {
     fileShareName: fileShareName
     storageAccountKey: storageAccountKey
     worldsDir: worldsDir
+    serverPass: serverPass
 
     cloudInit: loadTextContent('./cloud-init/valheim.yaml')
   }

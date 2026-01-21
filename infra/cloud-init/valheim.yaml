@@ -15,7 +15,7 @@ write_files:
 
       SERVER_NAME="OwenValheim"
       WORLD_NAME="OahuHawaii"
-      SERVER_PASS="change-me"
+      SERVER_PASS="__SERVER_PASS__"
       PORT="2456"
       PUBLIC="1"
 
