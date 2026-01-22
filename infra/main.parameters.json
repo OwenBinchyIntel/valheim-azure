@@ -2,7 +2,9 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
+    "location": { "value": "northeurope" },
     "adminUsername": { "value": "owen" },
+    "vmSize": { "value": "Standard_D2s_v5" },
     "sshSourceCidr": { "value": "*" },
     "storageAccountName": { "value": "valheim7463" },
     "fileShareName": { "value": "valheim" },
