@@ -125,8 +125,6 @@ Common regions: `northeurope`, `westeurope`, `uksouth`, `eastus`, `westus2`
 
 ### VM Sizing
 
-### VM Sizing
-
 The deployment supports flexible VM sizes configurable via the `vmSize` parameter:
 
 - **Default in template**: `Standard_B2ms` (2 vCPUs, 8 GB RAM)

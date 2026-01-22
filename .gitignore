@@ -1,0 +1,17 @@
+# Bicep compiled templates
+*.json
+!*.parameters.json
+
+# Azure deployment outputs
+*.bicepparam
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
